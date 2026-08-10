@@ -8,3 +8,6 @@ results/*.md
 !results/README.md
 samples/*
 !samples/README.md
+regression-samples/*
+!regression-samples/README.md
+artifacts/
