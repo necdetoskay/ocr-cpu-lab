@@ -83,8 +83,6 @@ Classification: **PASS — primary CPU-only candidate for Turkish document parsi
 
 ### OCR-CPU-PADDLE-003 — 15-page sustained warm throughput
 
-Configuration remained unchanged from the successful Turkish run:
-
 - Backend: **PP-StructureV3 / PaddlePaddle CPU**
 - OCR language: **tr**
 - Recognition family: **PP-OCRv5 multilingual (Turkish/Latin)**
@@ -92,53 +90,86 @@ Configuration remained unchanged from the successful Turkish run:
 - Pages completed: **15/15**
 - Total OCR time: **94.12 s**
 - Average/page: **6.27 s**
-- Previously measured model load: **65.70 s** (cold-start; not part of the 94.12 s OCR total)
-
-| Page | Seconds | Results | Chars |
-|---:|---:|---:|---:|
-| 1 | 9.14 | 1 | 3382 |
-| 2 | 8.06 | 1 | 4165 |
-| 3 | 5.68 | 1 | 1794 |
-| 4 | 8.16 | 1 | 1247 |
-| 5 | 5.38 | 1 | 2966 |
-| 6 | 5.95 | 1 | 2202 |
-| 7 | 5.53 | 1 | 1075 |
-| 8 | 5.58 | 1 | 2539 |
-| 9 | 4.95 | 1 | 1307 |
-| 10 | 7.51 | 1 | 3071 |
-| 11 | 5.44 | 1 | 1372 |
-| 12 | 6.39 | 1 | 3015 |
-| 13 | 5.11 | 1 | 835 |
-| 14 | 6.43 | 1 | 2844 |
-| 15 | 4.81 | 1 | 388 |
+- Previously measured model load: **65.70 s** cold-start
 
 Observed facts:
 
-- All **15 pages completed successfully** and every page returned one result object.
-- No progressive slowdown is visible across the document; later pages remain in the same or faster performance band.
+- All 15 pages completed successfully.
 - Per-page runtime ranged from **4.81 to 9.14 seconds**.
-- Sustained average improved to **6.27 s/page**, demonstrating that the earlier 9.23 s/page 3-page run was conservative for warm sustained throughput.
-- Against the controlled OvisOCR2 average of **84.77 s/page**, Paddle's sustained 6.27 s/page is approximately **13.5× faster** on the tested server.
-- User had already verified the Turkish recognition output as effectively flawless on the preceding Turkish-model run; document-complexity-specific quality validation remains outstanding.
+- Sustained average was **6.27 s/page**.
+- Against OvisOCR2's controlled **84.77 s/page**, Paddle was approximately **13.5× faster** on clean Turkish documents.
 
-Classification: **PASS — sustained CPU throughput target; current primary engine candidate.**
+Classification: **PASS — sustained CPU throughput target; current primary engine candidate for standard documents.**
+
+### OCR-CPU-PADDLE-LABEL-001 — Philips device label / PP-StructureV3
+
+Input type: photographed equipment label containing brand, model number, EAN, model ID, serial number and manufacturing text.
+
+Critical expected fields:
+
+- `27E2N25`
+- `8721038004472`
+- `27E2N2500/01`
+- `UK02601033689`
+- `HF4BRT2BFGPHDNE`
+
+PP-StructureV3 output retained only a subset of the visible label text and omitted key inventory fields including EAN, Model ID and Serial Number.
+
+Classification: **FAIL — PP-StructureV3 document mode is not suitable as the only path for dense device/equipment labels.**
+
+### OCR-CPU-PADDLE-LABEL-002 — Philips device label / General OCR Label Mode
+
+Configuration:
+
+- Backend: **Paddle General OCR / PP-OCRv5 CPU**
+- OCR language: **tr**
+- CPU threads: **8**
+- Upscale: **2.0×**
+- Detection side limit: **1920**
+- Recognition threshold: **0.35**
+- Model load: **1.94 s**
+- OCR time: **3.65 s**
+- Detected text lines: **23**
+- Average confidence: **0.903**
+
+Critical field recall:
+
+| Expected field | Status |
+|---|---|
+| `27E2N25` | PASS |
+| `8721038004472` | PASS |
+| `27E2N2500/01` | PASS |
+| `UK02601033689` | PASS |
+| `HF4BRT2BFGPHDNE` | PASS |
+
+- Correct: **5/5**
+- Field recall: **100.0%**
+- Regression result: **PASS**
+
+Additional observed text included brand, product type, color, EAN label, certification text and Made in China. Some non-critical labels had OCR spelling noise, but all required inventory identifiers were recovered correctly.
+
+Classification: **PASS — preferred CPU path for device labels and dense small-text inventory images.**
 
 ## Current interpretation
 
-For clean Turkish documents on the intended 8-vCPU / 32-GiB server, PaddleOCR PP-StructureV3 with Turkish PP-OCRv5 multilingual recognition is now clearly ahead of OvisOCR2 for the primary CPU path.
+A single Paddle pipeline is not sufficient for all document types, but the Paddle family is currently the strongest CPU-only solution when routed by input class:
 
-The 15-page run demonstrates both throughput and stability: **94.12 seconds total / 6.27 seconds per page**, with no failed pages or throughput collapse. OvisOCR2 remains valuable as a quality reference and possible difficult-document fallback, but its approximately **84.77 s/page** runtime is about **13.5× slower** than Paddle's sustained result on this workload.
+- **Standard documents / PDFs / structured pages:** PP-StructureV3 + Turkish PP-OCRv5 multilingual recognition.
+- **Device labels / serial-number photos / dense small text:** Paddle General OCR Label Mode with Turkish PP-OCRv5, 2× upscale and tuned detection.
+- **Difficult cases where Paddle quality materially degrades:** OvisOCR2 remains the quality-reference/fallback candidate, accepting its much higher CPU cost.
+
+The device-label regression is especially important because PP-StructureV3 silently omitted business-critical fields that were visually clear, while General OCR recovered **5/5 critical identifiers in 3.65 seconds**.
 
 ## Next tests
 
-1. `OCR-CPU-PADDLE-004` — complexity suite rather than another clean-text volume test.
-2. Include table-heavy, multi-column, formula, handwriting, low-quality/degraded scan, rotated page and photographed page cases.
-3. Record both speed and human-observed extraction quality for every category.
-4. Run OvisOCR2 only on cases where Paddle quality is materially degraded, to measure whether a fallback path is justified.
-5. If complexity tests pass, define the production-oriented Paddle service profile: healthcheck, persistent model cache, startup readiness, resource limits and API boundary.
+1. Add more label regressions: laptop/desktop service tag, switch/router label, printer label, UPS/monitor label and a low-light/angled photograph.
+2. Add structured-document complexity cases: table-heavy, multi-column, formula, low-quality scan and rotated/photographed page.
+3. Define an automatic routing heuristic between Document Mode and Label Mode; initially this can also be user-selectable in the test UI.
+4. Add field-recall assertions to every inventory-label regression rather than relying only on visual quality review.
+5. If the regression suite remains strong, consolidate the two Paddle modes behind one production API and keep Ovis as an optional fallback.
 
 ## Decision state
 
-**Current leader: PaddleOCR PP-StructureV3 + Turkish PP-OCRv5 multilingual recognition.**
+**Current CPU-only architecture leader: routed PaddleOCR.**
 
-Paddle has passed clean-document Turkish quality, 3-page functional testing, and 15-page sustained CPU throughput. The remaining gate is difficult-document quality.
+PP-StructureV3 is the leading standard-document parser; Paddle General OCR is the leading device-label parser. OvisOCR2 remains a fallback/research path for difficult cases rather than the default engine.
