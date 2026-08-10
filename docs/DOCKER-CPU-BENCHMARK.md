@@ -13,29 +13,38 @@ This stack runs the OvisOCR2 GGUF test on a real server with Docker Compose so C
 
 ## Requirements
 
-- Docker Engine with Docker Compose plugin
+- Docker Engine
+- Docker Compose v2 with Git-resource support
 - Linux amd64 or arm64 host
-- Internet access for the first model download
+- Internet access for the first image/model download
 - enough free disk space for the model/cache
 
-## Start
+## Preferred deployment — no manual clone
+
+Docker Compose can load the Compose project directly from the public GitHub repository. The repository is fetched by Compose/BuildKit as needed; no manual `git clone` is required.
 
 ```bash
-git pull
-docker compose -f docker-compose.cpu.yml pull
-docker compose -f docker-compose.cpu.yml up -d --build
+docker compose -f "https://github.com/necdetoskay/ocr-cpu-lab.git#main:docker-compose.cpu.yml" up -d --build
 ```
 
-Watch model startup/download:
+Keep the URL quoted because `#` has shell meaning.
+
+Check status:
 
 ```bash
-docker compose -f docker-compose.cpu.yml logs -f llama-server
+docker ps --filter name=ocr-cpu
 ```
 
-Watch both services:
+Watch the model server:
 
 ```bash
-docker compose -f docker-compose.cpu.yml logs -f
+docker logs -f ocr-cpu-llama-server
+```
+
+Watch UI:
+
+```bash
+docker logs -f ocr-cpu-ui
 ```
 
 When the server is ready, open:
@@ -46,10 +55,19 @@ http://SERVER_IP:7861
 
 The llama.cpp API is also exposed on port 8080 for benchmark inspection.
 
+## Traditional cloned-repository deployment
+
+If remote Compose is unavailable on an older Compose release, clone the repository and run:
+
+```bash
+git clone https://github.com/necdetoskay/ocr-cpu-lab.git
+cd ocr-cpu-lab
+docker compose -f docker-compose.cpu.yml up -d --build
+```
+
 ## Verify CPU-only configuration
 
 ```bash
-docker compose -f docker-compose.cpu.yml ps
 docker stats ocr-cpu-llama-server ocr-cpu-ui
 ```
 
@@ -110,18 +128,16 @@ htop
 
 ## Stop
 
+For remote-Compose deployment:
+
 ```bash
-docker compose -f docker-compose.cpu.yml down
+docker compose -f "https://github.com/necdetoskay/ocr-cpu-lab.git#main:docker-compose.cpu.yml" down
 ```
 
 The downloaded model cache remains in the `llama-cache` named volume.
 
-To remove the cache intentionally:
-
-```bash
-docker compose -f docker-compose.cpu.yml down -v
-```
+To remove the cache intentionally, use the same command with `-v`.
 
 ## Interpretation
 
-The workstation GGUF baseline currently measured approximately 64.9 seconds for a 1489x2105 clean one-page PDF with 1393 completion tokens. The server test should use the same document so the host hardware effect can be measured directly.
+The workstation GGUF baseline measured 64.90 seconds for a 1489x2105 clean one-page PDF with 1393 completion tokens. The three-page workstation run completed in 253.63 seconds (84.54 seconds/page average) while the workstation was under concurrent load. The server test should use the same source documents so host-hardware effects can be measured directly.
