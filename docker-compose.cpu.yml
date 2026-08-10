@@ -53,14 +53,32 @@ services:
       PADDLE_PDX_MODEL_SOURCE: BOS
       PADDLE_CPU_THREADS: "8"
       PADDLE_OCR_LANG: tr
-      PADDLE_LABEL_UPSCALE: "2.0"
-      PADDLE_LABEL_DET_SIDE_LEN: "1920"
-      PADDLE_LABEL_REC_SCORE_THRESH: "0.35"
-      OCR_REGRESSION_PATH: /app/regressions/label_cases.json
       OMP_NUM_THREADS: "8"
       MKL_NUM_THREADS: "8"
     ports:
       - "44631:7862"
+    volumes:
+      - paddle-cache:/root/.paddlex
+      - paddle-hf-cache:/root/.cache
+    shm_size: "4gb"
+    restart: unless-stopped
+
+  paddle-label-ui:
+    build:
+      context: https://github.com/necdetoskay/ocr-cpu-lab.git#main
+      dockerfile: Dockerfile.paddle-label
+    container_name: ocr-cpu-paddle-label-ui
+    environment:
+      PADDLE_LABEL_GRADIO_PORT: "7863"
+      PADDLE_PDX_MODEL_SOURCE: BOS
+      PADDLE_CPU_THREADS: "8"
+      PADDLE_LABEL_UPSCALE: "2.0"
+      PADDLE_LABEL_DET_SIDE_LEN: "1920"
+      PADDLE_LABEL_REC_SCORE_THRESH: "0.35"
+      OMP_NUM_THREADS: "8"
+      MKL_NUM_THREADS: "8"
+    ports:
+      - "44819:7863"
     volumes:
       - paddle-cache:/root/.paddlex
       - paddle-hf-cache:/root/.cache
