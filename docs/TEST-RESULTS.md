@@ -1,12 +1,10 @@
-# TEST RESULTS — OvisOCR2 CPU
-
-Test family: `OCR-CPU-OVIS2`
+# TEST RESULTS — OCR CPU Lab
 
 Status: **IN PROGRESS**
 
 This file is the canonical human-readable result log. Measured values are kept separate from estimates.
 
-## Confirmed runs
+## OvisOCR2 CPU
 
 ### OCR-CPU-OVIS2-001 — Transformers / Torch CPU baseline
 
@@ -17,70 +15,40 @@ This file is the canonical human-readable result log. Measured values are kept s
 - Process RAM during inference: ~1.0–1.1 GB observed
 - Result: inference exceeded 200 seconds for one page and was stopped before a useful completed result
 - Classification: **FAIL — interactive CPU path not worthwhile**
-- Important note: the runtime reported that the optimized fast path was unavailable and it fell back to the Torch implementation.
 
 ### OCR-CPU-OVIS2-002 — llama.cpp GGUF Q4_K_M, single page
 
-- Backend: llama.cpp
-- Quantization: Q4_K_M
-- GPU layers: 0
-- Multimodal projector GPU offload: disabled
-- Input: 1-page PDF, 1489x2105
 - Total request: **64.90 s**
 - Prompt tokens: **3171**
 - Completion tokens: **1393**
-- Max output tokens: **2048**
 - Finish reason: `stop`
-- Token limit hit: **NO**
 - Output characters: **4267**
 - User-observed extraction quality: **excellent**
-- Classification: **PASS — technically viable CPU-only path, currently too slow for interactive multi-page use**
 
-### OCR-CPU-OVIS2-003 — llama.cpp GGUF Q4_K_M, 3-page sequential workstation run
+### OCR-CPU-OVIS2-003 — workstation 3-page sequential
 
-- Backend: llama.cpp / Q4_K_M
-- Server: local `127.0.0.1:8080`
 - Pages completed: **3/3**
 - Total OCR time: **253.63 s**
 - Average/page: **84.54 s**
-- Adaptive retries (2048→4096): **0**
 
-| Page | Seconds | Prompt tok | Completion tok | Max tok | Finish | Retry | Chars |
-|---:|---:|---:|---:|---:|---|---|---:|
-| 1 | 63.15 | 3171 | 1393 | 2048 | stop | NO | 4267 |
-| 2 | 109.85 | 3171 | 1543 | 2048 | stop | NO | 4567 |
-| 3 | 80.62 | 3171 | 832 | 2048 | stop | NO | 2126 |
+| Page | Seconds | Prompt tok | Completion tok | Chars |
+|---:|---:|---:|---:|---:|
+| 1 | 63.15 | 3171 | 1393 | 4267 |
+| 2 | 109.85 | 3171 | 1543 | 4567 |
+| 3 | 80.62 | 3171 | 832 | 2126 |
 
-Classification: **PASS — multi-page pipeline is functionally stable; performance too slow for interactive use.**
-
-### OCR-CPU-OVIS2-004 — Docker server baseline before memory fix
-
-Server profile observed during the initial Docker benchmark:
+### OCR-CPU-OVIS2-004 — Docker server before memory fix
 
 - CPU: **8 vCPU**, Intel Xeon Cascade Lake under KVM
 - RAM: **11 GiB**
-- Available RAM during test: approximately **382 MiB**
-- Swap: **2 GiB**, effectively exhausted during the test
-- Initial llama.cpp configuration exposed 4 slots with extremely large context capacity
-
-Observed partial page timings:
-
-| Page | Seconds | Prompt tok | Completion tok | Max tok | Finish | Retry | Chars |
-|---:|---:|---:|---:|---:|---|---|---:|
-| 1 | 155.27 | 3171 | 1393 | 2048 | stop | NO | 4260 |
-| 2 | 216.05 | 3171 | 1528 | 2048 | stop | NO | 4570 |
-
-The run also showed generation throughput around **0.53 token/s** on a later page. This run is classified as **INVALID FOR PERFORMANCE DECISION** because the host was under severe memory/swap pressure.
+- Host was under severe memory/swap pressure
+- Partial page timings: **155.27 s**, **216.05 s**
+- Classification: **INVALID FOR PERFORMANCE DECISION**
 
 ### OCR-CPU-OVIS2-005 — Docker server, 32 GiB RAM + constrained llama.cpp
 
-Controlled server configuration:
-
 - CPU: **8 vCPU**, Intel Xeon Cascade Lake under KVM
 - RAM: **32 GiB**
-- llama.cpp: Q4_K_M, CPU only
-- GPU layers: **0**
-- multimodal projector GPU offload: disabled
 - `--parallel 1`
 - `--ctx-size 8192`
 - `--threads 8`
@@ -88,38 +56,78 @@ Controlled server configuration:
 - Pages completed: **3/3**
 - Total OCR time: **254.30 s**
 - Average/page: **84.77 s**
-- Adaptive retries (2048→4096): **0**
 
-| Page | Seconds | Prompt tok | Completion tok | Max tok | Finish | Retry | Chars |
-|---:|---:|---:|---:|---:|---|---|---:|
-| 1 | 90.88 | 3171 | 1393 | 2048 | stop | NO | 4260 |
-| 2 | 99.75 | 3171 | 1528 | 2048 | stop | NO | 4570 |
-| 3 | 63.67 | 3171 | 836 | 2048 | stop | NO | 2128 |
-
-Observed facts:
-
-- Increasing RAM from 11 GiB to 32 GiB and removing the oversized multi-slot context eliminated the catastrophic 155–216 s/page behavior.
-- The optimized server average (**84.77 s/page**) is almost identical to the workstation 3-page average (**84.54 s/page**).
-- All pages completed naturally with `finish_reason=stop`; no adaptive retry was required.
-- The result strongly suggests the remaining bottleneck is compute/vision-generation throughput rather than RAM capacity.
+| Page | Seconds | Prompt tok | Completion tok | Chars |
+|---:|---:|---:|---:|---:|
+| 1 | 90.88 | 3171 | 1393 | 4260 |
+| 2 | 99.75 | 3171 | 1528 | 4570 |
+| 3 | 63.67 | 3171 | 836 | 2128 |
 
 Classification: **PASS — stable CPU-only batch path; FAIL — interactive performance target.**
 
+## PaddleOCR / PP-StructureV3 CPU
+
+### OCR-CPU-PADDLE-001 — default recognition model
+
+- Backend: PP-StructureV3 / PaddlePaddle CPU
+- CPU threads: **8**
+- Pages completed: **3/3**
+- Total OCR time: **115.79 s**
+- Average/page: **38.60 s**
+- Model load: **14.16 s**
+- Page timings: **95.97 s**, **11.98 s**, **7.84 s**
+- User-observed Turkish quality: **FAIL — Turkish characters/recognition quality poor**
+- Interpretation: speed was promising after warm-up, but the default recognition model was not acceptable for Turkish.
+
+### OCR-CPU-PADDLE-002 — Turkish PP-OCRv5 multilingual recognition
+
+Configuration:
+
+- Backend: **PP-StructureV3 / PaddlePaddle CPU**
+- OCR language: **tr**
+- Recognition family: **PP-OCRv5 multilingual (Turkish/Latin)**
+- CPU threads: **8**
+- Pages completed: **3/3**
+- Model load: **65.70 s** cold-start
+- Total OCR time: **27.68 s**
+- Average/page: **9.23 s**
+
+| Page | Seconds | Results | Chars |
+|---:|---:|---:|---:|
+| 1 | 12.30 | 1 | 3178 |
+| 2 | 9.11 | 1 | 4164 |
+| 3 | 6.28 | 1 | 1790 |
+
+User-observed extraction quality: **excellent / effectively flawless on the tested Turkish document**.
+
+Observed facts:
+
+- Explicit Turkish recognition fixed the character/recognition problems seen with the default model.
+- All three pages produced valid structured output.
+- Sustained page processing was **6.28–12.30 s/page**.
+- Average OCR time was **9.23 s/page**, approximately **9.2× faster** than the controlled OvisOCR2 server average of **84.77 s/page** on the same 3-page document.
+- The **65.70 s model-load time is cold-start cost**, not per-page inference time. Once the container/model remains warm, the relevant steady-state metric is the per-page OCR time.
+
+Classification: **PASS — primary CPU-only candidate for Turkish document parsing.**
+
 ## Current interpretation
 
-The CPU-only OvisOCR2 GGUF path is technically stable, produces excellent output on the tested clean documents, supports multi-page page-scoped processing, and does not require GPU acceleration. However, on both the workstation and the intended 8-vCPU Cascade Lake server, sustained performance is approximately **85 seconds per page** for the current 1489x2105 render setting.
+For the tested clean Turkish documents on the intended 8-vCPU / 32-GiB server, PaddleOCR PP-StructureV3 with explicit Turkish PP-OCRv5 multilingual recognition currently provides the best balance of speed and quality.
 
-The initial server slowdown was caused largely by memory/swap pressure and overly large llama.cpp context/parallel defaults. After correcting those issues and increasing RAM, the server converged to the same performance class as the workstation. More RAM alone therefore does not solve the remaining throughput problem.
+OvisOCR2 remains a useful quality reference and possible fallback for document types where generative end-to-end parsing materially outperforms PaddleOCR, but its approximately **85 s/page** CPU runtime is not competitive for the primary path on this hardware.
+
+PaddleOCR should therefore become the current **primary candidate**, subject to complexity/regression testing.
 
 ## Next tests
 
-1. `OCR-CPU-OVIS2-006` — resolution sweep using the same known page at lower render resolutions/DPI.
-2. Compare extraction quality and speed across those resolution settings.
-3. Complexity suite at the best resolution: clean text, dense text, table, multi-column, formula, handwriting/degraded scan.
-4. Add a CPU-oriented competing OCR/document parser and run the same source pages for speed/quality comparison.
+1. `OCR-CPU-PADDLE-003` — warm repeat of the same 3-page PDF to confirm steady-state reproducibility without cold-start effects.
+2. `OCR-CPU-PADDLE-004` — 10-page throughput test.
+3. Complexity suite: table-heavy, multi-column, formula, handwriting, low-quality/degraded scan, rotated/photographed page.
+4. Compare PaddleOCR vs OvisOCR2 on only the difficult cases where Paddle quality degrades.
+5. Define routing/fallback policy if Ovis materially wins any difficult-document category.
 
 ## Decision state
 
-**OvisOCR2 is currently classified as a viable CPU-only batch/offline parser, but not an interactive CPU OCR engine on the tested hardware.**
+**Current leader: PaddleOCR PP-StructureV3 + Turkish PP-OCRv5 multilingual recognition.**
 
-Final decision may change if the resolution sweep preserves quality while reducing runtime substantially.
+OvisOCR2 remains available as a fallback/research candidate rather than the default CPU OCR engine.
