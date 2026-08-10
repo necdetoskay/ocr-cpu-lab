@@ -8,10 +8,11 @@ import gradio as gr
 import requests
 from PIL import Image
 
-from src.pdf import load_document_image
+from src.pdf import document_page_count, load_document_page
 
 SERVER = "http://127.0.0.1:8080"
-MAX_TOKENS = 2048
+DEFAULT_MAX_TOKENS = 2048
+RETRY_MAX_TOKENS = 4096
 PROMPT = (
     "Extract all readable content from the image in natural human reading order and output the result as a single Markdown document. "
     "For charts or images, represent them using an HTML image tag with bounding-box coordinates. "
@@ -35,69 +36,128 @@ def _model_id() -> str:
     return data[0]["id"]
 
 
-def run_ocr(file_path: str | None):
+def _ocr_page(image: Image.Image, model: str, max_tokens: int) -> dict:
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": PROMPT},
+                    {"type": "image_url", "image_url": {"url": _image_to_data_url(image)}},
+                ],
+            }
+        ],
+        "temperature": 0,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    started = time.perf_counter()
+    response = requests.post(
+        f"{SERVER}/v1/chat/completions",
+        json=payload,
+        timeout=3600,
+    )
+    response.raise_for_status()
+    elapsed = time.perf_counter() - started
+    body = response.json()
+    choice = body["choices"][0]
+    usage = body.get("usage", {})
+    completion_tokens = usage.get("completion_tokens")
+    finish_reason = choice.get("finish_reason", "unknown")
+    hit_limit = finish_reason == "length" or completion_tokens == max_tokens
+    return {
+        "text": choice["message"]["content"],
+        "elapsed": elapsed,
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": completion_tokens,
+        "finish_reason": finish_reason,
+        "max_tokens": max_tokens,
+        "hit_limit": hit_limit,
+    }
+
+
+def _metrics_markdown(rows: list[dict], model: str) -> str:
+    total = sum(row["elapsed"] for row in rows)
+    retries = sum(1 for row in rows if row["retried"])
+    lines = [
+        "### GGUF CPU document metrics",
+        "",
+        "- Backend: llama.cpp / Q4_K_M",
+        f"- Server: {SERVER}",
+        f"- Model: `{model}`",
+        f"- Pages completed: {len(rows)}",
+        f"- Total OCR time: {total:.2f} s",
+        f"- Average/page: {total / len(rows):.2f} s" if rows else "- Average/page: n/a",
+        f"- Adaptive retries (2048→4096): {retries}",
+        "",
+        "| Page | Seconds | Prompt tok | Completion tok | Max tok | Finish | Retry | Chars |",
+        "|---:|---:|---:|---:|---:|---|---|---:|",
+    ]
+    for row in rows:
+        lines.append(
+            f"| {row['page']} | {row['elapsed']:.2f} | {row['prompt_tokens'] or 'n/a'} | "
+            f"{row['completion_tokens'] or 'n/a'} | {row['max_tokens']} | {row['finish_reason']} | "
+            f"{'YES' if row['retried'] else 'NO'} | {row['chars']} |"
+        )
+    return "\n".join(lines)
+
+
+def run_ocr(file_path: str | None, progress=gr.Progress()):
     if not file_path:
-        return None, "Please select a PDF or image.", ""
+        yield None, "Please select a PDF or image.", ""
+        return
 
     try:
-        image = load_document_image(file_path)
-        started = time.perf_counter()
+        page_count = document_page_count(file_path)
         model = _model_id()
+        outputs: list[str] = []
+        rows: list[dict] = []
+        preview = None
 
-        payload = {
-            "model": model,
-            "messages": [
+        for page_index in range(page_count):
+            page_no = page_index + 1
+            progress(page_index / page_count, desc=f"Rendering page {page_no}/{page_count}")
+            image = load_document_page(file_path, page_index)
+            preview = image
+            yield preview, "\n\n".join(outputs), _metrics_markdown(rows, model) if rows else f"Processing page {page_no}/{page_count}..."
+
+            progress((page_index + 0.15) / page_count, desc=f"OCR page {page_no}/{page_count} — 2048 token ceiling")
+            first = _ocr_page(image, model, DEFAULT_MAX_TOKENS)
+            result = first
+            retried = False
+
+            if first["hit_limit"]:
+                retried = True
+                progress((page_index + 0.55) / page_count, desc=f"Page {page_no} hit token ceiling — retrying with 4096")
+                result = _ocr_page(image, model, RETRY_MAX_TOKENS)
+
+            outputs.append(f"# Page {page_no}\n\n{result['text'].strip()}")
+            rows.append(
                 {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": PROMPT},
-                        {"type": "image_url", "image_url": {"url": _image_to_data_url(image)}},
-                    ],
+                    "page": page_no,
+                    "elapsed": first["elapsed"] + (result["elapsed"] if retried else 0.0),
+                    "prompt_tokens": result["prompt_tokens"],
+                    "completion_tokens": result["completion_tokens"],
+                    "max_tokens": result["max_tokens"],
+                    "finish_reason": result["finish_reason"],
+                    "retried": retried,
+                    "chars": len(result["text"]),
                 }
-            ],
-            "temperature": 0,
-            "max_tokens": MAX_TOKENS,
-            "stream": False,
-        }
+            )
+            progress((page_index + 1) / page_count, desc=f"Completed page {page_no}/{page_count}")
+            yield preview, "\n\n---\n\n".join(outputs), _metrics_markdown(rows, model)
 
-        response = requests.post(
-            f"{SERVER}/v1/chat/completions",
-            json=payload,
-            timeout=1800,
-        )
-        response.raise_for_status()
-        body = response.json()
-        choice = body["choices"][0]
-        text = choice["message"]["content"]
-        finish_reason = choice.get("finish_reason", "unknown")
-        elapsed = time.perf_counter() - started
-        usage = body.get("usage", {})
-        completion_tokens = usage.get("completion_tokens", "n/a")
-        hit_limit = completion_tokens == MAX_TOKENS or finish_reason == "length"
-
-        metrics = (
-            "### GGUF CPU metrics\n"
-            f"- Backend: llama.cpp / Q4_K_M\n"
-            f"- Server: {SERVER}\n"
-            f"- Model: `{model}`\n"
-            f"- Total request: {elapsed:.2f} s\n"
-            f"- Input: {image.width}x{image.height}\n"
-            f"- Prompt tokens: {usage.get('prompt_tokens', 'n/a')}\n"
-            f"- Completion tokens: {completion_tokens}\n"
-            f"- Max tokens: {MAX_TOKENS}\n"
-            f"- Finish reason: `{finish_reason}`\n"
-            f"- Token limit hit: {'YES' if hit_limit else 'NO'}\n"
-            f"- Output chars: {len(text)}"
-        )
-        return image, text, metrics
+        progress(1.0, desc="Document complete")
     except Exception as exc:
-        return None, f"GGUF OCR failed: `{type(exc).__name__}: {exc}`", ""
+        yield None, f"GGUF OCR failed: `{type(exc).__name__}: {exc}`", ""
 
 
 with gr.Blocks(title="OCR CPU Lab — OvisOCR2 GGUF") as demo:
     gr.Markdown(
         "# OCR CPU Lab — OvisOCR2 GGUF / llama.cpp\n"
-        f"CPU-only comparison path using Q4_K_M. Max output: **{MAX_TOKENS} tokens**. "
+        "CPU-only Q4_K_M document test. PDFs are processed **page by page**. "
+        "Each page starts at 2048 output tokens; only pages that hit the limit are retried at 4096. "
         "Start `scripts/run-ovis-gguf-cpu.ps1` first."
     )
     source = gr.File(
@@ -107,11 +167,11 @@ with gr.Blocks(title="OCR CPU Lab — OvisOCR2 GGUF") as demo:
     )
     run_button = gr.Button("Run GGUF OCR", variant="primary")
     with gr.Row():
-        preview = gr.Image(label="Rendered input", type="pil")
+        preview = gr.Image(label="Current rendered page", type="pil")
         output = gr.Markdown(label="OCR Markdown")
     metrics = gr.Markdown(label="Runtime metrics")
     run_button.click(run_ocr, [source], [preview, output, metrics])
 
 
 if __name__ == "__main__":
-    demo.launch(server_name="127.0.0.1", server_port=7861, inbrowser=True)
+    demo.queue().launch(server_name="127.0.0.1", server_port=7861, inbrowser=True)
