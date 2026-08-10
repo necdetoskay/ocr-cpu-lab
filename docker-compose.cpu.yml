@@ -8,6 +8,14 @@ services:
       - --n-gpu-layers
       - "0"
       - --no-mmproj-offload
+      - --parallel
+      - "1"
+      - --ctx-size
+      - "8192"
+      - --threads
+      - "8"
+      - --threads-batch
+      - "8"
       - --host
       - 0.0.0.0
       - --port
