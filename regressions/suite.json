@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "sample_root": "/data/regression-samples",
+  "cases": [
+    {
+      "id": "DOC-TEXT-001",
+      "category": "document_text",
+      "sample": "doc-text-001.pdf",
+      "pipeline": "document_text",
+      "expectation_source": "regressions/document_cases.json"
+    },
+    {
+      "id": "DEVICE-LABEL-001",
+      "category": "device_label",
+      "sample": "device-label-001.jpg",
+      "pipeline": "label",
+      "expectation_source": "regressions/label_cases.json"
+    }
+  ]
+}
