@@ -6,3 +6,4 @@ Pillow>=10.0
 PyMuPDF>=1.24
 psutil>=6.0
 accelerate>=1.0
+requests>=2.32
