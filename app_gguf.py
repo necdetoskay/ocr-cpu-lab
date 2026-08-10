@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import time
 
 import gradio as gr
@@ -10,9 +11,11 @@ from PIL import Image
 
 from src.pdf import document_page_count, load_document_page
 
-SERVER = "http://127.0.0.1:8080"
-DEFAULT_MAX_TOKENS = 2048
-RETRY_MAX_TOKENS = 4096
+SERVER = os.getenv("LLAMA_SERVER_URL", "http://127.0.0.1:8080")
+DEFAULT_MAX_TOKENS = int(os.getenv("OCR_DEFAULT_MAX_TOKENS", "2048"))
+RETRY_MAX_TOKENS = int(os.getenv("OCR_RETRY_MAX_TOKENS", "4096"))
+GRADIO_HOST = os.getenv("GRADIO_SERVER_NAME", "127.0.0.1")
+GRADIO_PORT = int(os.getenv("GRADIO_SERVER_PORT", "7861"))
 PROMPT = (
     "Extract all readable content from the image in natural human reading order and output the result as a single Markdown document. "
     "For charts or images, represent them using an HTML image tag with bounding-box coordinates. "
@@ -89,7 +92,7 @@ def _metrics_markdown(rows: list[dict], model: str) -> str:
         f"- Pages completed: {len(rows)}",
         f"- Total OCR time: {total:.2f} s",
         f"- Average/page: {total / len(rows):.2f} s" if rows else "- Average/page: n/a",
-        f"- Adaptive retries (2048→4096): {retries}",
+        f"- Adaptive retries ({DEFAULT_MAX_TOKENS}→{RETRY_MAX_TOKENS}): {retries}",
         "",
         "| Page | Seconds | Prompt tok | Completion tok | Max tok | Finish | Retry | Chars |",
         "|---:|---:|---:|---:|---:|---|---|---:|",
@@ -122,14 +125,14 @@ def run_ocr(file_path: str | None, progress=gr.Progress()):
             preview = image
             yield preview, "\n\n".join(outputs), _metrics_markdown(rows, model) if rows else f"Processing page {page_no}/{page_count}..."
 
-            progress((page_index + 0.15) / page_count, desc=f"OCR page {page_no}/{page_count} — 2048 token ceiling")
+            progress((page_index + 0.15) / page_count, desc=f"OCR page {page_no}/{page_count} — {DEFAULT_MAX_TOKENS} token ceiling")
             first = _ocr_page(image, model, DEFAULT_MAX_TOKENS)
             result = first
             retried = False
 
             if first["hit_limit"]:
                 retried = True
-                progress((page_index + 0.55) / page_count, desc=f"Page {page_no} hit token ceiling — retrying with 4096")
+                progress((page_index + 0.55) / page_count, desc=f"Page {page_no} hit token ceiling — retrying with {RETRY_MAX_TOKENS}")
                 result = _ocr_page(image, model, RETRY_MAX_TOKENS)
 
             outputs.append(f"# Page {page_no}\n\n{result['text'].strip()}")
@@ -157,8 +160,7 @@ with gr.Blocks(title="OCR CPU Lab — OvisOCR2 GGUF") as demo:
     gr.Markdown(
         "# OCR CPU Lab — OvisOCR2 GGUF / llama.cpp\n"
         "CPU-only Q4_K_M document test. PDFs are processed **page by page**. "
-        "Each page starts at 2048 output tokens; only pages that hit the limit are retried at 4096. "
-        "Start `scripts/run-ovis-gguf-cpu.ps1` first."
+        f"Each page starts at {DEFAULT_MAX_TOKENS} output tokens; only pages that hit the limit are retried at {RETRY_MAX_TOKENS}."
     )
     source = gr.File(
         label="PDF / image",
@@ -174,4 +176,4 @@ with gr.Blocks(title="OCR CPU Lab — OvisOCR2 GGUF") as demo:
 
 
 if __name__ == "__main__":
-    demo.queue().launch(server_name="127.0.0.1", server_port=7861, inbrowser=True)
+    demo.queue().launch(server_name=GRADIO_HOST, server_port=GRADIO_PORT, inbrowser=False)
