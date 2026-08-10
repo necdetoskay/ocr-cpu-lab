@@ -30,17 +30,16 @@ def get_runner() -> OvisOCR2CPU:
     return _runner
 
 
-def _heartbeat_markdown(elapsed: float) -> str:
-    ram_mb = _process.memory_info().rss / (1024 * 1024)
-    cpu_percent = _process.cpu_percent(interval=None)
+def _heartbeat_markdown(elapsed: float, ram_mb: float, process_cpu: float, system_cpu: float) -> str:
     return (
         "### Live status\n"
         "**State:** CPU inference running  \n"
         f"**Elapsed:** {elapsed:.1f} s  \n"
         f"**Process RAM:** {ram_mb:,.0f} MB  \n"
-        f"**Process CPU:** {cpu_percent:.1f}%  \n"
-        "\nThe elapsed time and resource values update every 2 seconds. "
-        "This is a heartbeat, not token-level generation progress."
+        f"**Process CPU:** {process_cpu:.1f}%  \n"
+        f"**System CPU:** {system_cpu:.1f}%  \n"
+        "\nValues update every ~2 seconds. This is a liveness/resource heartbeat, "
+        "not token-level generation progress."
     )
 
 
@@ -63,20 +62,28 @@ def run_ocr(file_path: str | None, progress=gr.Progress()):
         progress(0.25, desc="CPU inference running — watch Live status below")
         print("[ocr-cpu-lab] CPU inference started...", flush=True)
         inference_started = time.perf_counter()
+
+        # Re-prime immediately before inference so the first heartbeat has a clean baseline.
+        _process.cpu_percent(interval=None)
+        psutil.cpu_percent(interval=None)
         future = _executor.submit(runner.run, image)
 
         while not future.done():
+            time.sleep(2.0)
             elapsed = time.perf_counter() - inference_started
-            status = _heartbeat_markdown(elapsed)
+            ram_mb = _process.memory_info().rss / (1024 * 1024)
+            process_cpu = _process.cpu_percent(interval=None)
+            system_cpu = psutil.cpu_percent(interval=None)
+            status = _heartbeat_markdown(elapsed, ram_mb, process_cpu, system_cpu)
             print(
                 "[ocr-cpu-lab] heartbeat "
                 f"elapsed={elapsed:.1f}s "
-                f"ram={_process.memory_info().rss / (1024 * 1024):.0f}MB "
-                f"cpu={_process.cpu_percent(interval=None):.1f}%",
+                f"ram={ram_mb:.0f}MB "
+                f"process_cpu={process_cpu:.1f}% "
+                f"system_cpu={system_cpu:.1f}%",
                 flush=True,
             )
             yield image, "", "", status
-            time.sleep(2.0)
 
         result = future.result()
         print(
