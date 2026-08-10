@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PADDLE_PDX_MODEL_SOURCE=BOS
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 libgl1 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.paddle.txt /app/requirements.paddle.txt
+RUN python -m pip install --no-cache-dir --upgrade pip && \
+    python -m pip install --no-cache-dir paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ && \
+    python -m pip install --no-cache-dir -r /app/requirements.paddle.txt
+
+COPY app_paddle.py /app/app_paddle.py
+COPY src /app/src
+
+EXPOSE 7862
+CMD ["python", "app_paddle.py"]
