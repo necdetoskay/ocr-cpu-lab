@@ -1,6 +1,7 @@
 gradio>=5.0
 transformers>=4.57
 torch>=2.5
+torchvision>=0.20
 Pillow>=10.0
 PyMuPDF>=1.24
 psutil>=6.0
