@@ -43,7 +43,7 @@ class OvisOCR2CPU:
         self.model_load_seconds = timer() - started
 
     @torch.inference_mode()
-    def run(self, image: Image.Image, max_new_tokens: int = 4096) -> OCRResult:
+    def run(self, image: Image.Image, max_new_tokens: int = 512) -> OCRResult:
         total_started = timer()
         ram_before = process_ram_mb()
 
