@@ -1,0 +1,18 @@
+{
+  "DOC-TEXT-001": {
+    "name": "Turkish procurement text completeness",
+    "description": "Single-column Turkish procurement text. Designed to catch silent line loss in layout/Markdown reconstruction.",
+    "recommended_mode": "Text OCR",
+    "expected_markers": [
+      "37.1",
+      "37.2",
+      "Madde 38",
+      "38.1",
+      "38.2",
+      "38.3"
+    ],
+    "acceptance": {
+      "marker_recall": 1.0
+    }
+  }
+}
