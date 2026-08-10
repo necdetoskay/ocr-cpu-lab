@@ -1,63 +1,65 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import time
-from pathlib import Path
 
 import gradio as gr
+import numpy as np
 from paddleocr import PPStructureV3
 
 from src.pdf import document_page_count, load_document_page
 
 PORT = int(os.getenv("PADDLE_GRADIO_PORT", "7862"))
+CPU_THREADS = int(os.getenv("PADDLE_CPU_THREADS", "8"))
 
 _pipeline: PPStructureV3 | None = None
+_model_load_seconds: float | None = None
 
 
 def get_pipeline() -> PPStructureV3:
-    global _pipeline
+    global _pipeline, _model_load_seconds
     if _pipeline is None:
         print("[ocr-cpu-lab] Loading PP-StructureV3 on CPU...", flush=True)
         started = time.perf_counter()
         _pipeline = PPStructureV3(
             device="cpu",
+            cpu_threads=CPU_THREADS,
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_textline_orientation=False,
         )
-        print(f"[ocr-cpu-lab] PP-StructureV3 ready in {time.perf_counter() - started:.2f}s", flush=True)
+        _model_load_seconds = time.perf_counter() - started
+        print(f"[ocr-cpu-lab] PP-StructureV3 ready in {_model_load_seconds:.2f}s", flush=True)
     return _pipeline
 
 
 def _extract_markdown(result) -> str:
-    with tempfile.TemporaryDirectory(prefix="paddle-md-") as tmpdir:
-        result.save_to_markdown(save_path=tmpdir)
-        markdown_files = sorted(Path(tmpdir).rglob("*.md"))
-        if not markdown_files:
-            return ""
-        return "\n\n".join(path.read_text(encoding="utf-8") for path in markdown_files)
+    md = getattr(result, "markdown", None)
+    if not isinstance(md, dict):
+        return ""
+    text = md.get("markdown_texts", "")
+    return text if isinstance(text, str) else ""
 
 
-def _metrics(rows: list[dict], model_load_seconds: float | None = None) -> str:
+def _metrics(rows: list[dict]) -> str:
     total = sum(row["seconds"] for row in rows)
     lines = [
         "### PaddleOCR CPU document metrics",
         "",
         "- Backend: PP-StructureV3 / PaddlePaddle CPU",
+        f"- CPU threads: {CPU_THREADS}",
         f"- Pages completed: {len(rows)}",
         f"- Total OCR time: {total:.2f} s",
         f"- Average/page: {total / len(rows):.2f} s" if rows else "- Average/page: n/a",
-    ]
-    if model_load_seconds is not None:
-        lines.append(f"- Model load: {model_load_seconds:.2f} s")
-    lines += [
+        f"- Model load: {_model_load_seconds:.2f} s" if _model_load_seconds is not None else "- Model load: n/a",
         "",
-        "| Page | Seconds | Chars |",
-        "|---:|---:|---:|",
+        "| Page | Seconds | Results | Chars |",
+        "|---:|---:|---:|---:|",
     ]
     for row in rows:
-        lines.append(f"| {row['page']} | {row['seconds']:.2f} | {row['chars']} |")
+        lines.append(
+            f"| {row['page']} | {row['seconds']:.2f} | {row['result_count']} | {row['chars']} |"
+        )
     return "\n".join(lines)
 
 
@@ -67,9 +69,7 @@ def run_ocr(file_path: str | None, progress=gr.Progress()):
         return
 
     try:
-        load_started = time.perf_counter()
         pipeline = get_pipeline()
-        load_seconds = time.perf_counter() - load_started
         count = document_page_count(file_path)
         rows: list[dict] = []
         outputs: list[str] = []
@@ -80,20 +80,45 @@ def run_ocr(file_path: str | None, progress=gr.Progress()):
             progress(page_index / count, desc=f"Rendering page {page_no}/{count}")
             image = load_document_page(file_path, page_index)
             preview = image
-            yield preview, "\n\n---\n\n".join(outputs), _metrics(rows, load_seconds) if rows else f"Processing page {page_no}/{count}..."
+            yield preview, "\n\n---\n\n".join(outputs), _metrics(rows) if rows else f"Processing page {page_no}/{count}..."
+
+            # PP-StructureV3 officially accepts numpy.ndarray for in-memory image input.
+            image_np = np.asarray(image.convert("RGB"))
 
             started = time.perf_counter()
-            results = list(pipeline.predict(image))
+            results = list(pipeline.predict(input=image_np))
             elapsed = time.perf_counter() - started
-            page_markdown = "\n\n".join(_extract_markdown(result).strip() for result in results).strip()
+
+            if not results:
+                raise RuntimeError(
+                    f"PP-StructureV3 returned no result objects for page {page_no}; benchmark aborted instead of recording a false zero-second success."
+                )
+
+            parts = [_extract_markdown(result).strip() for result in results]
+            parts = [part for part in parts if part]
+            page_markdown = "\n\n".join(parts).strip()
+
+            if not page_markdown:
+                result_types = ", ".join(type(result).__name__ for result in results)
+                raise RuntimeError(
+                    f"PP-StructureV3 returned {len(results)} result object(s) but no Markdown for page {page_no}. Result types: {result_types}"
+                )
+
             outputs.append(f"# Page {page_no}\n\n{page_markdown}")
-            rows.append({"page": page_no, "seconds": elapsed, "chars": len(page_markdown)})
+            rows.append(
+                {
+                    "page": page_no,
+                    "seconds": elapsed,
+                    "result_count": len(results),
+                    "chars": len(page_markdown),
+                }
+            )
             print(
-                f"[ocr-cpu-lab] paddle page={page_no} seconds={elapsed:.2f} chars={len(page_markdown)}",
+                f"[ocr-cpu-lab] paddle page={page_no} seconds={elapsed:.2f} results={len(results)} chars={len(page_markdown)}",
                 flush=True,
             )
             progress((page_index + 1) / count, desc=f"Completed page {page_no}/{count}")
-            yield preview, "\n\n---\n\n".join(outputs), _metrics(rows, load_seconds)
+            yield preview, "\n\n---\n\n".join(outputs), _metrics(rows)
 
         progress(1.0, desc="Document complete")
     except Exception as exc:
