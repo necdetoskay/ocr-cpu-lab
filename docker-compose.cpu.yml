@@ -60,6 +60,8 @@ services:
     volumes:
       - paddle-cache:/root/.paddlex
       - paddle-hf-cache:/root/.cache
+      - ./regression-samples:/data/regression-samples:ro
+      - ./artifacts:/app/artifacts
     shm_size: "4gb"
     restart: unless-stopped
 
