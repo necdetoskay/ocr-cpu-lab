@@ -17,6 +17,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
 
 COPY app_paddle.py /app/app_paddle.py
 COPY regressions /app/regressions
+COPY scripts /app/scripts
 COPY src /app/src
 
 EXPOSE 7862
