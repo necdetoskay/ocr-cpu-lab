@@ -1,0 +1,8 @@
+.git
+.venv
+__pycache__
+*.pyc
+samples/*
+results/*
+!samples/README.md
+!results/README.md
