@@ -43,5 +43,25 @@ services:
       - llama-server
     restart: unless-stopped
 
+  paddle-ui:
+    build:
+      context: https://github.com/necdetoskay/ocr-cpu-lab.git#main
+      dockerfile: Dockerfile.paddle
+    container_name: ocr-cpu-paddle-ui
+    environment:
+      PADDLE_GRADIO_PORT: "7862"
+      PADDLE_PDX_MODEL_SOURCE: BOS
+      OMP_NUM_THREADS: "8"
+      MKL_NUM_THREADS: "8"
+    ports:
+      - "44631:7862"
+    volumes:
+      - paddle-cache:/root/.paddlex
+      - paddle-hf-cache:/root/.cache
+    shm_size: "4gb"
+    restart: unless-stopped
+
 volumes:
   llama-cache:
+  paddle-cache:
+  paddle-hf-cache:
