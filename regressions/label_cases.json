@@ -1,0 +1,16 @@
+{
+  "DEVICE-LABEL-001": {
+    "description": "Philips monitor product label with model, EAN, model ID, serial number and manufacturing code.",
+    "expected_fields": [
+      "27E2N25",
+      "8721038004472",
+      "27E2N2500/01",
+      "UK02601033689",
+      "HF4BRT2BFGPHDNE"
+    ],
+    "acceptance": {
+      "field_recall": 1.0,
+      "critical_fields_must_all_match": true
+    }
+  }
+}
