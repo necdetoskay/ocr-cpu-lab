@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.gguf.txt ./
+RUN pip install --no-cache-dir -r requirements.gguf.txt
+
+COPY app_gguf.py ./
+COPY src ./src
+
+ENV LLAMA_SERVER_URL=http://llama-server:8080 \
+    GRADIO_SERVER_NAME=0.0.0.0 \
+    GRADIO_SERVER_PORT=7861 \
+    OCR_DEFAULT_MAX_TOKENS=2048 \
+    OCR_RETRY_MAX_TOKENS=4096
+
+EXPOSE 7861
+
+CMD ["python", "app_gguf.py"]
