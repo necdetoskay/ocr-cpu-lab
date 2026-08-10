@@ -20,7 +20,7 @@ services:
 
   ocr-ui:
     build:
-      context: .
+      context: https://github.com/necdetoskay/ocr-cpu-lab.git#main
       dockerfile: Dockerfile.gguf-app
     container_name: ocr-cpu-ui
     environment:
