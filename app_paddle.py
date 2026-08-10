@@ -11,6 +11,7 @@ from src.pdf import document_page_count, load_document_page
 
 PORT = int(os.getenv("PADDLE_GRADIO_PORT", "7862"))
 CPU_THREADS = int(os.getenv("PADDLE_CPU_THREADS", "8"))
+OCR_LANG = os.getenv("PADDLE_OCR_LANG", "tr")
 
 _pipeline: PPStructureV3 | None = None
 _model_load_seconds: float | None = None
@@ -19,11 +20,12 @@ _model_load_seconds: float | None = None
 def get_pipeline() -> PPStructureV3:
     global _pipeline, _model_load_seconds
     if _pipeline is None:
-        print("[ocr-cpu-lab] Loading PP-StructureV3 on CPU...", flush=True)
+        print(f"[ocr-cpu-lab] Loading PP-StructureV3 on CPU with lang={OCR_LANG}...", flush=True)
         started = time.perf_counter()
         _pipeline = PPStructureV3(
             device="cpu",
             cpu_threads=CPU_THREADS,
+            lang=OCR_LANG,
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_textline_orientation=False,
@@ -47,6 +49,8 @@ def _metrics(rows: list[dict]) -> str:
         "### PaddleOCR CPU document metrics",
         "",
         "- Backend: PP-StructureV3 / PaddlePaddle CPU",
+        f"- OCR language: {OCR_LANG}",
+        "- Recognition family: PP-OCRv5 multilingual (Turkish/Latin)",
         f"- CPU threads: {CPU_THREADS}",
         f"- Pages completed: {len(rows)}",
         f"- Total OCR time: {total:.2f} s",
@@ -82,7 +86,6 @@ def run_ocr(file_path: str | None, progress=gr.Progress()):
             preview = image
             yield preview, "\n\n---\n\n".join(outputs), _metrics(rows) if rows else f"Processing page {page_no}/{count}..."
 
-            # PP-StructureV3 officially accepts numpy.ndarray for in-memory image input.
             image_np = np.asarray(image.convert("RGB"))
 
             started = time.perf_counter()
@@ -114,7 +117,7 @@ def run_ocr(file_path: str | None, progress=gr.Progress()):
                 }
             )
             print(
-                f"[ocr-cpu-lab] paddle page={page_no} seconds={elapsed:.2f} results={len(results)} chars={len(page_markdown)}",
+                f"[ocr-cpu-lab] paddle lang={OCR_LANG} page={page_no} seconds={elapsed:.2f} results={len(results)} chars={len(page_markdown)}",
                 flush=True,
             )
             progress((page_index + 1) / count, desc=f"Completed page {page_no}/{count}")
@@ -129,7 +132,8 @@ def run_ocr(file_path: str | None, progress=gr.Progress()):
 with gr.Blocks(title="OCR CPU Lab — PaddleOCR") as demo:
     gr.Markdown(
         "# OCR CPU Lab — PP-StructureV3 / PaddleOCR\n"
-        "CPU-only document parsing benchmark. Orientation classification, unwarping and text-line orientation are disabled for the baseline."
+        f"CPU-only document parsing benchmark using **Turkish OCR (`lang={OCR_LANG}`)**. "
+        "Orientation classification, unwarping and text-line orientation are disabled for the baseline."
     )
     source = gr.File(
         label="PDF / image",
