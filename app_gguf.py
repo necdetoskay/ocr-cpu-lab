@@ -11,6 +11,7 @@ from PIL import Image
 from src.pdf import load_document_image
 
 SERVER = "http://127.0.0.1:8080"
+MAX_TOKENS = 2048
 PROMPT = (
     "Extract all readable content from the image in natural human reading order and output the result as a single Markdown document. "
     "For charts or images, represent them using an HTML image tag with bounding-box coordinates. "
@@ -55,20 +56,24 @@ def run_ocr(file_path: str | None):
                 }
             ],
             "temperature": 0,
-            "max_tokens": 512,
+            "max_tokens": MAX_TOKENS,
             "stream": False,
         }
 
         response = requests.post(
             f"{SERVER}/v1/chat/completions",
             json=payload,
-            timeout=900,
+            timeout=1800,
         )
         response.raise_for_status()
         body = response.json()
-        text = body["choices"][0]["message"]["content"]
+        choice = body["choices"][0]
+        text = choice["message"]["content"]
+        finish_reason = choice.get("finish_reason", "unknown")
         elapsed = time.perf_counter() - started
         usage = body.get("usage", {})
+        completion_tokens = usage.get("completion_tokens", "n/a")
+        hit_limit = completion_tokens == MAX_TOKENS or finish_reason == "length"
 
         metrics = (
             "### GGUF CPU metrics\n"
@@ -78,7 +83,10 @@ def run_ocr(file_path: str | None):
             f"- Total request: {elapsed:.2f} s\n"
             f"- Input: {image.width}x{image.height}\n"
             f"- Prompt tokens: {usage.get('prompt_tokens', 'n/a')}\n"
-            f"- Completion tokens: {usage.get('completion_tokens', 'n/a')}\n"
+            f"- Completion tokens: {completion_tokens}\n"
+            f"- Max tokens: {MAX_TOKENS}\n"
+            f"- Finish reason: `{finish_reason}`\n"
+            f"- Token limit hit: {'YES' if hit_limit else 'NO'}\n"
             f"- Output chars: {len(text)}"
         )
         return image, text, metrics
@@ -89,7 +97,8 @@ def run_ocr(file_path: str | None):
 with gr.Blocks(title="OCR CPU Lab — OvisOCR2 GGUF") as demo:
     gr.Markdown(
         "# OCR CPU Lab — OvisOCR2 GGUF / llama.cpp\n"
-        "CPU-only comparison path using Q4_K_M. Start `scripts/run-ovis-gguf-cpu.ps1` first."
+        f"CPU-only comparison path using Q4_K_M. Max output: **{MAX_TOKENS} tokens**. "
+        "Start `scripts/run-ovis-gguf-cpu.ps1` first."
     )
     source = gr.File(
         label="PDF / image",
