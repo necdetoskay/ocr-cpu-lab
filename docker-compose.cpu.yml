@@ -13,7 +13,7 @@ services:
       - --port
       - "8080"
     ports:
-      - "8080:8080"
+      - "43721:8080"
     volumes:
       - llama-cache:/root/.cache
     restart: unless-stopped
@@ -30,7 +30,7 @@ services:
       OCR_DEFAULT_MAX_TOKENS: "2048"
       OCR_RETRY_MAX_TOKENS: "4096"
     ports:
-      - "7861:7861"
+      - "44387:7861"
     depends_on:
       - llama-server
     restart: unless-stopped
