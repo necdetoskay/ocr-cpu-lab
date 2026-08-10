@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import time
+from pathlib import Path
 
 import gradio as gr
 import numpy as np
@@ -14,11 +17,21 @@ CPU_THREADS = int(os.getenv("PADDLE_CPU_THREADS", "8"))
 OCR_LANG = os.getenv("PADDLE_OCR_LANG", "tr")
 TEXT_REC_SCORE_THRESH = float(os.getenv("PADDLE_DOC_REC_SCORE_THRESH", "0.30"))
 TEXT_DET_SIDE_LEN = int(os.getenv("PADDLE_DOC_DET_SIDE_LEN", "1920"))
+REGRESSION_PATH = Path(os.getenv("OCR_DOCUMENT_REGRESSION_PATH", "/app/regressions/document_cases.json"))
 
 _structure_pipeline: PPStructureV3 | None = None
 _text_pipeline: PaddleOCR | None = None
 _structure_load_seconds: float | None = None
 _text_load_seconds: float | None = None
+
+
+def _load_regressions() -> dict:
+    if not REGRESSION_PATH.exists():
+        return {}
+    return json.loads(REGRESSION_PATH.read_text(encoding="utf-8"))
+
+
+REGRESSIONS = _load_regressions()
 
 
 def get_structure_pipeline() -> PPStructureV3:
@@ -116,7 +129,42 @@ def _run_structured_page(image) -> tuple[str, int, float]:
     return page_markdown, len(results), elapsed
 
 
-def _metrics(rows: list[dict], mode: str) -> str:
+def _normalize(value: str) -> str:
+    return re.sub(r"\s+", " ", value.casefold()).strip()
+
+
+def _regression_metrics(output_text: str, case_id: str) -> str:
+    if case_id == "None":
+        return ""
+    case = REGRESSIONS.get(case_id)
+    if not case:
+        return f"\n\n### Regression\n\nUnknown case: `{case_id}`"
+    markers = case.get("expected_markers", [])
+    haystack = _normalize(output_text)
+    found = []
+    for marker in markers:
+        ok = _normalize(marker) in haystack
+        found.append((marker, ok))
+    correct = sum(1 for _, ok in found if ok)
+    recall = correct / len(found) if found else 0.0
+    required = float(case.get("acceptance", {}).get("marker_recall", 1.0))
+    status = "PASS" if recall >= required else "FAIL"
+    rows = "\n".join(f"| `{marker}` | {'PASS' if ok else 'MISS'} |" for marker, ok in found)
+    recommended = case.get("recommended_mode", "n/a")
+    return (
+        f"\n\n### {case_id} regression gate\n\n"
+        f"- Recommended mode: **{recommended}**\n"
+        f"- Correct markers: **{correct}/{len(found)}**\n"
+        f"- Marker recall: **{recall * 100:.1f}%**\n"
+        f"- Required: **{required * 100:.1f}%**\n"
+        f"- Result: **{status}**\n\n"
+        "| Expected marker | Status |\n"
+        "|---|---|\n"
+        f"{rows}"
+    )
+
+
+def _metrics(rows: list[dict], mode: str, output_text: str = "", regression_case: str = "None") -> str:
     total = sum(row["seconds"] for row in rows)
     load_seconds = _text_load_seconds if mode == "Text OCR" else _structure_load_seconds
     backend = "General OCR / PP-OCRv5" if mode == "Text OCR" else "PP-StructureV3"
@@ -137,10 +185,10 @@ def _metrics(rows: list[dict], mode: str) -> str:
     ]
     for row in rows:
         lines.append(f"| {row['page']} | {row['seconds']:.2f} | {row['items']} | {row['chars']} |")
-    return "\n".join(lines)
+    return "\n".join(lines) + _regression_metrics(output_text, regression_case)
 
 
-def run_ocr(file_path: str | None, mode: str, progress=gr.Progress()):
+def run_ocr(file_path: str | None, mode: str, regression_case: str, progress=gr.Progress()):
     if not file_path:
         yield None, "Please select a PDF or image.", ""
         return
@@ -156,7 +204,8 @@ def run_ocr(file_path: str | None, mode: str, progress=gr.Progress()):
             progress(page_index / count, desc=f"Processing page {page_no}/{count}")
             image = load_document_page(file_path, page_index)
             preview = image
-            yield preview, "\n\n---\n\n".join(outputs), _metrics(rows, mode) if rows else f"Processing page {page_no}/{count}..."
+            current_output = "\n\n---\n\n".join(outputs)
+            yield preview, current_output, _metrics(rows, mode, current_output, regression_case) if rows else f"Processing page {page_no}/{count}..."
 
             if mode == "Text OCR":
                 page_text, items, elapsed = _run_text_page(image)
@@ -165,18 +214,21 @@ def run_ocr(file_path: str | None, mode: str, progress=gr.Progress()):
 
             outputs.append(f"# Page {page_no}\n\n{page_text}")
             rows.append({"page": page_no, "seconds": elapsed, "items": items, "chars": len(page_text)})
+            full_output = "\n\n---\n\n".join(outputs)
             print(
                 f"[ocr-cpu-lab] paddle document mode={mode} page={page_no} seconds={elapsed:.2f} items={items} chars={len(page_text)}",
                 flush=True,
             )
             progress((page_index + 1) / count, desc=f"Completed page {page_no}/{count}")
-            yield preview, "\n\n---\n\n".join(outputs), _metrics(rows, mode)
+            yield preview, full_output, _metrics(rows, mode, full_output, regression_case)
 
         progress(1.0, desc="Document complete")
     except Exception as exc:
         print(f"[ocr-cpu-lab] Paddle document ERROR {type(exc).__name__}: {exc}", flush=True)
         yield None, f"PaddleOCR failed: `{type(exc).__name__}: {exc}`", ""
 
+
+regression_choices = ["None"] + sorted(REGRESSIONS.keys())
 
 with gr.Blocks(title="OCR CPU Lab — PaddleOCR Documents") as demo:
     gr.Markdown(
@@ -189,13 +241,15 @@ with gr.Blocks(title="OCR CPU Lab — PaddleOCR Documents") as demo:
         file_types=[".pdf", ".png", ".jpg", ".jpeg"],
         type="filepath",
     )
-    mode = gr.Radio(["Text OCR", "Structured"], value="Text OCR", label="Document mode")
+    with gr.Row():
+        mode = gr.Radio(["Text OCR", "Structured"], value="Text OCR", label="Document mode")
+        regression_case = gr.Dropdown(regression_choices, value="None", label="Regression case")
     run_button = gr.Button("Run PaddleOCR", variant="primary")
     with gr.Row():
         preview = gr.Image(label="Current rendered page", type="pil")
         output = gr.Markdown(label="OCR output")
-    metrics = gr.Markdown(label="Runtime metrics")
-    run_button.click(run_ocr, [source, mode], [preview, output, metrics])
+    metrics = gr.Markdown(label="Runtime / regression metrics")
+    run_button.click(run_ocr, [source, mode, regression_case], [preview, output, metrics])
 
 
 if __name__ == "__main__":
